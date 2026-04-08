@@ -1,0 +1,229 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+SCRIPT_NAME="$(basename "$0")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DOTFILES_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+BACKUP_DIR="$HOME/.dotfiles.backup/$(date +%Y%m%d_%H%M%S)"
+
+COMMAND=""
+DRY_RUN=0
+
+show_usage() {
+    echo -e "用法: ${BLUE}${SCRIPT_NAME}${NC} <link|unlink> [选项]"
+    echo ""
+    echo "说明:"
+    echo "  将 ${DOTFILES_ROOT} 下的 dotfiles 软链接到当前用户家目录。"
+    echo ""
+    echo "子命令:"
+    printf "  ${BLUE}%-15s${NC} %s\n" "link" "建立或更新软链接"
+    printf "  ${BLUE}%-15s${NC} %s\n" "unlink" "移除通过此脚本创建的软链接"
+    echo ""
+    echo "选项:"
+    printf "  ${BLUE}%-15s${NC} %s\n" "--dry-run" "预览模式，只显示将要执行的操作"
+    printf "  ${BLUE}%-15s${NC} %s\n" "-h, --help" "显示本帮助信息"
+    echo ""
+    echo "示例:"
+    printf "  ${BLUE}%s${NC}\n" "  ${SCRIPT_NAME} link"
+    printf "  ${BLUE}%s${NC}\n" "  ${SCRIPT_NAME} link --dry-run"
+    printf "  ${BLUE}%s${NC}\n" "  ${SCRIPT_NAME} unlink"
+}
+
+if [ $# -eq 0 ]; then
+    show_usage
+    exit 1
+fi
+
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        link|unlink)
+            COMMAND="$1"
+            ;;
+        --dry-run)
+            DRY_RUN=1
+            ;;
+        -h|--help)
+            show_usage
+            exit 0
+            ;;
+        *)
+            echo "未知参数: $1" >&2
+            echo ""
+            show_usage
+            exit 1
+            ;;
+    esac
+    shift
+done
+
+if [ -z "$COMMAND" ]; then
+    echo "缺少子命令: link 或 unlink" >&2
+    echo ""
+    show_usage
+    exit 1
+fi
+
+link_item() {
+    local src="$1"
+    local dest="$2"
+
+    if [ -L "$dest" ] && [ "$(readlink "$dest")" = "$src" ]; then
+        echo -e "  ${CYAN}[跳过]${NC} $dest 已正确链接，无需重复操作"
+        return
+    fi
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+        if [ -e "$dest" ] && [ ! -L "$dest" ]; then
+            echo -e "  ${YELLOW}[预览-备份]${NC} 将备份真实的旧配置 $dest -> $BACKUP_DIR/"
+        elif [ -L "$dest" ]; then
+            echo -e "  ${YELLOW}[预览-替换]${NC} 将替换指向错误的软链接 $dest"
+        fi
+        echo -e "  ${GREEN}[预览-链接]${NC} 将建立链接 $dest -> $src"
+        return
+    fi
+
+    mkdir -p "$(dirname "$dest")"
+
+    if [ -e "$dest" ] && [ ! -L "$dest" ]; then
+        echo -e "  ${YELLOW}[备份]${NC} 发现既有配置，移动 $dest -> $BACKUP_DIR/"
+        mkdir -p "$BACKUP_DIR"
+        mv "$dest" "$BACKUP_DIR/"
+    elif [ -L "$dest" ]; then
+        rm "$dest"
+    fi
+
+    ln -s "$src" "$dest"
+    echo -e "  ${GREEN}[链接]${NC} $dest -> $src"
+}
+
+remove_link() {
+    local target="$1"
+
+    if [ ! -L "$target" ]; then
+        return
+    fi
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo -e "  ${YELLOW}[预览-清理]${NC} 将移除链接: $target"
+        return
+    fi
+
+    rm "$target"
+    echo -e "  ${YELLOW}[清理]${NC} 已移除链接: $target"
+}
+
+deploy_tree_children() {
+    local source_dir="$1"
+    local target_dir="$2"
+
+    [ -d "$source_dir" ] || return 0
+
+    for item in "$source_dir"/*; do
+        [ -e "$item" ] || continue
+        link_item "$item" "$target_dir/$(basename "$item")"
+    done
+}
+
+cleanup_tree_children() {
+    local source_dir="$1"
+    local target_dir="$2"
+
+    [ -d "$source_dir" ] || return 0
+
+    for item in "$source_dir"/*; do
+        [ -e "$item" ] || continue
+        remove_link "$target_dir/$(basename "$item")"
+    done
+}
+
+deploy_local_children() {
+    local local_root="$DOTFILES_ROOT/.local"
+    [ -d "$local_root" ] || return 0
+
+    for subdir in "$local_root"/*; do
+        [ -d "$subdir" ] || continue
+        deploy_tree_children "$subdir" "$HOME/.local/$(basename "$subdir")"
+    done
+}
+
+cleanup_local_children() {
+    local local_root="$DOTFILES_ROOT/.local"
+    [ -d "$local_root" ] || return 0
+
+    for subdir in "$local_root"/*; do
+        [ -d "$subdir" ] || continue
+        cleanup_tree_children "$subdir" "$HOME/.local/$(basename "$subdir")"
+    done
+}
+
+deploy_root_dotfiles() {
+    for file in "$DOTFILES_ROOT"/.*; do
+        [ -e "$file" ] || continue
+
+        local base_name
+        base_name=$(basename "$file")
+        case "$base_name" in
+            .|..|.git|.gitignore|.config|.local)
+                continue
+                ;;
+        esac
+
+        link_item "$file" "$HOME/$base_name"
+    done
+}
+
+cleanup_root_dotfiles() {
+    for file in "$DOTFILES_ROOT"/.*; do
+        [ -e "$file" ] || continue
+
+        local base_name
+        base_name=$(basename "$file")
+        case "$base_name" in
+            .|..|.git|.gitignore|.config|.local)
+                continue
+                ;;
+        esac
+
+        remove_link "$HOME/$base_name"
+    done
+}
+
+if [ "$COMMAND" = "link" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo -e "${CYAN}=== 正在运行部署预览 (Dry-run) ===${NC}"
+    else
+        echo "开始增量部署 Dotfiles..."
+    fi
+
+    deploy_tree_children "$DOTFILES_ROOT/.config" "$HOME/.config"
+    deploy_local_children
+    deploy_root_dotfiles
+
+    if [ "$DRY_RUN" -eq 0 ]; then
+        echo -e "\n部署完成！"
+        if [ -d "$BACKUP_DIR" ] && [ "$(ls -A "$BACKUP_DIR" 2>/dev/null)" ]; then
+            echo -e "⚠️  旧配置已备份至: ${YELLOW}$BACKUP_DIR${NC}"
+        fi
+    fi
+    exit 0
+fi
+
+if [ "$DRY_RUN" -eq 1 ]; then
+    echo -e "${CYAN}=== 正在运行清理预览 (Dry-run) ===${NC}"
+else
+    echo "开始清理 Dotfiles 软链接..."
+fi
+
+cleanup_tree_children "$DOTFILES_ROOT/.config" "$HOME/.config"
+cleanup_local_children
+cleanup_root_dotfiles
+
+if [ "$DRY_RUN" -eq 0 ]; then
+    echo -e "\n清理完成！"
+fi

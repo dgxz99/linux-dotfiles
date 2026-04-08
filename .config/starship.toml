@@ -1,0 +1,160 @@
+"$schema" = 'https://starship.rs/config-schema.json'
+
+format = """
+$os\
+$username\
+$hostname\
+$shell\
+$directory\
+$git_branch\
+$git_status\
+$c\
+$cpp\
+$rust\
+$golang\
+$nodejs\
+$php\
+$java\
+$kotlin\
+$haskell\
+$python\ 
+$docker_context\ 
+$line_break$character"""
+
+right_format = """$time"""
+
+# add_newline = false
+palette = 'daguo'
+
+[palettes.daguo]
+color_fg0 = '#fbf1c7'
+color_bg1 = '#3c3836'
+color_bg3 = '#665c54'
+color_blue = '#458588'
+color_aqua = '#689d6a'
+color_green = '#98971a'
+color_orange = '#d65d0e'
+color_purple = '#b16286'
+color_red = '#cc241d'
+color_yellow = '#d79921'
+color_magenta = '#f786f7'
+color_white = '#dfdfdf'
+
+[os]
+disabled = false
+format = '[$symbol ](bold cyan)'
+
+[os.symbols]
+Windows = "󰍲"
+Ubuntu = "󰕈"
+SUSE = ""
+Raspbian = "󰐿"
+Mint = "󰣭"
+Macos = "󰀵"
+Manjaro = ""
+Linux = "󰌽"
+Gentoo = "󰣨"
+Fedora = "󰣛"
+Alpine = ""
+Amazon = ""
+Android = ""
+AOSC = ""
+Arch = "󰣇"
+Artix = "󰣇"
+EndeavourOS = ""
+CentOS = ""
+Debian = "󰣚"
+Redhat = "󱄛"
+RedHatEnterprise = "󱄛"
+Pop = ""
+
+[username]
+show_always = true
+format = '[$user](bright-green)[@](color_white)'
+
+[hostname]
+disabled = false
+ssh_only = false
+format = '[$hostname](bright-purple) '
+
+[shell]
+fish_indicator = '󰈺'
+bash_indicator = '_'
+powershell_indicator = '󰨊'
+unknown_indicator = ''
+style = 'cyan bold'
+disabled = false
+
+[directory]
+format = "[$path ](color_yellow)"
+truncation_length = 6
+truncation_symbol = "…/"
+
+[directory.substitutions]
+"Documents" = "󰈙"
+"Downloads" = ""
+"Music" = "󰝚"
+"Pictures" = ""
+
+[git_branch]
+symbol = ""
+format = '[$symbol $branch ](color_aqua)'
+
+[git_status]
+format = '[($all_status$ahead_behind )](color_aqua)'
+
+[nodejs]
+symbol = ""
+format = '[$symbol( $version) ](cyan)'
+
+[c]
+symbol = " "
+format = '[$symbol( $version) ](cyan)'
+
+[cpp]
+symbol = " "
+format = '[$symbol( $version) ](cyan)'
+
+[rust]
+symbol = ""
+format = '[$symbol( $version) ](cyan)'
+
+[golang]
+symbol = ""
+format = '[$symbol( $version) ](cyan)'
+
+[php]
+symbol = ""
+format = '[$symbol( $version) ](cyan)'
+
+[java]
+symbol = ""
+format = '[$symbol( $version) ](cyan)'
+
+[kotlin]
+symbol = ""
+format = '[$symbol( $version) ](cyan)'
+
+[haskell]
+symbol = ""
+format = '[$symbol( $version) ](cyan)'
+
+[python]
+symbol = ""
+format = '[$symbol( $version)(\($virtualenv\)) ](cyan)'
+
+[docker_context]
+symbol = ""
+format = '[[$symbol( $context) ](fg:color_bg3)]($style)'
+
+[time]
+disabled = false
+format = '[ $time](fg:color_bg3)'
+
+[line_break]
+disabled = false
+
+[character]
+disabled = false
+success_symbol = '[\$](color_white)'
+error_symbol = '[\$](color_white)'
