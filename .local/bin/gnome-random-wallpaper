@@ -6,7 +6,7 @@
 # ==============================================================================
 
 # 1. 环境校验：确保运行在 GNOME 桌面
-if [ "$XDG_CURRENT_DESKTOP" != "GNOME" ]; then
+if [[ "$XDG_CURRENT_DESKTOP" != *"GNOME"* ]]; then
     echo "错误: 仅支持 GNOME 桌面环境。" >&2
     [ -x "$(command -v notify-send)" ] && notify-send -u critical "环境错误" "此脚本仅支持 GNOME 桌面"
     exit 1

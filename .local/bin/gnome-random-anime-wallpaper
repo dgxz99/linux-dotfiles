@@ -15,7 +15,7 @@ ENABLE_UPSCALE=true
 SILENT_MODE=false
 
 # ================= 环境校验 =================
-if [ "$XDG_CURRENT_DESKTOP" != "GNOME" ]; then
+if [[ "$XDG_CURRENT_DESKTOP" != *"GNOME"* ]]; then
     [ "$SILENT_MODE" = false ] && notify-send -u critical "环境错误" "此脚本仅支持 GNOME 桌面环境。"
     exit 1
 fi
