@@ -16,7 +16,7 @@ SILENT_MODE=false
 
 # ================= 环境校验 =================
 if [ "$XDG_CURRENT_DESKTOP" != "GNOME" ]; then
-    [ "$SILENT_MODE" = false ] && notify-send -u critical "Error" "This script requires GNOME desktop."
+    [ "$SILENT_MODE" = false ] && notify-send -u critical "环境错误" "此脚本仅支持 GNOME 桌面环境。"
     exit 1
 fi
 
@@ -54,14 +54,14 @@ if [ "$SILENT_MODE" = false ]; then
     (
         sleep 8
         while true; do
-            notify-send "Wallpaper" "Downloading is still in progress..." --expire-time=5000 --icon=drive-harddisk --replace-id=999
+            notify-send "壁纸切换" "仍在下载中，请稍候..." --icon=drive-harddisk --replace-id=999
             sleep 8
         done
     ) &
     NOTIFY_PID=$!
 fi
 
-send_notify "Wallpaper" "Downloading from Alcy..." "--expire-time=5000"
+send_notify "壁纸切换" "正在从 Alcy 下载壁纸..."
 
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 curl -L -s -A "$USER_AGENT" --connect-timeout 10 -m 120 -o "$RAW_PATH" "$API_URL"
@@ -70,7 +70,7 @@ DOWNLOAD_EXIT_CODE=$?
 [ -n "${NOTIFY_PID:-}" ] && kill "$NOTIFY_PID" 2>/dev/null && wait "$NOTIFY_PID" 2>/dev/null
 
 if [ $DOWNLOAD_EXIT_CODE -ne 0 ] || [ ! -f "$RAW_PATH" ]; then
-    send_notify "Wallpaper Error" "Download failed" "--urgency=critical"
+    send_notify "壁纸错误" "下载失败" "-u critical"
     exit 1
 fi
 
@@ -81,11 +81,11 @@ MSG_EXTRA=""
 if [ "$ENABLE_UPSCALE" = true ] && command -v identify &> /dev/null; then
     IMG_WIDTH=$(identify -format "%w" "$RAW_PATH")
     if [ "$IMG_WIDTH" -gt 0 ] && [ "$IMG_WIDTH" -lt "$UPSCALE_THRESHOLD" ] && command -v waifu2x-ncnn-vulkan &> /dev/null; then
-        send_notify "Wallpaper" "Upscaling image..." "--expire-time=2000"
+        send_notify "壁纸切换" "正在提升图片分辨率..."
         UPSCALED_PATH="${RAW_PATH%.*}.png"
         if waifu2x-ncnn-vulkan -i "$RAW_PATH" -o "$UPSCALED_PATH" -n 1 -s 2; then
             FINAL_PATH="$UPSCALED_PATH"
-            MSG_EXTRA="(Upscaled 2x)"
+            MSG_EXTRA="(已放大 2 倍)"
             rm -f "$RAW_PATH"
         fi
     fi
@@ -109,4 +109,4 @@ gsettings set org.gnome.desktop.background picture-options 'zoom'
     fi
 ) &
 
-send_notify "Wallpaper Updated" "Enjoy! $MSG_EXTRA"
+send_notify "壁纸已更新" "应用成功！$MSG_EXTRA"
