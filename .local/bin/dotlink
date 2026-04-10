@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 终端输出颜色定义
 BLUE='\033[0;34m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 CYAN='\033[0;36m'
-NC='\033[0m'
+NC='\033[0m' # 重置颜色
 
+# 目录路径与状态变量
 SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DOTFILES_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BACKUP_DIR="$HOME/.dotfiles.backup/$(date +%Y%m%d_%H%M%S)"
+DOTFILES_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)" # 相对脚本所在路径解析出 dotfiles 的根目录
+BACKUP_DIR="$HOME/.dotfiles.backup/$(date +%Y%m%d_%H%M%S)" # 本地备份目录
 
 COMMAND=""
 DRY_RUN=0
@@ -40,12 +42,14 @@ if [ $# -eq 0 ]; then
     exit 1
 fi
 
+# 解析命令行参数
 while [[ "$#" -gt 0 ]]; do
     case "$1" in
         link|unlink)
             COMMAND="$1"
             ;;
         --dry-run)
+            # 设置预览模式标志位
             DRY_RUN=1
             ;;
         -h|--help)
@@ -73,11 +77,13 @@ link_item() {
     local src="$1"
     local dest="$2"
 
+    # 如果软链接已存在且指向正确，则跳过
     if [ -L "$dest" ] && [ "$(readlink "$dest")" = "$src" ]; then
         echo -e "  ${CYAN}[跳过]${NC} $dest 已正确链接，无需重复操作"
         return
     fi
 
+    # 预览模式下的逻辑展示
     if [ "$DRY_RUN" -eq 1 ]; then
         if [ -e "$dest" ] && [ ! -L "$dest" ]; then
             echo -e "  ${YELLOW}[预览-备份]${NC} 将备份真实的旧配置 $dest -> $BACKUP_DIR/"
@@ -88,23 +94,29 @@ link_item() {
         return
     fi
 
+    # 确保目标文件的父目录存在
     mkdir -p "$(dirname "$dest")"
 
+    # 如果目标是真实文件/目录而非软链接，则将其移动到备份目录
     if [ -e "$dest" ] && [ ! -L "$dest" ]; then
         echo -e "  ${YELLOW}[备份]${NC} 发现既有配置，移动 $dest -> $BACKUP_DIR/"
         mkdir -p "$BACKUP_DIR"
         mv "$dest" "$BACKUP_DIR/"
+    # 如果目标是软链接（哪怕是死链接或是错的链接），直接删除
     elif [ -L "$dest" ]; then
         rm "$dest"
     fi
 
+    # 创建新的软链接
     ln -s "$src" "$dest"
     echo -e "  ${GREEN}[链接]${NC} $dest -> $src"
 }
 
+# 移除指定的软链接
 remove_link() {
     local target="$1"
 
+    # 安全检查：仅移除软链接，防止误删真实文件
     if [ ! -L "$target" ]; then
         return
     fi
@@ -118,76 +130,70 @@ remove_link() {
     echo -e "  ${YELLOW}[清理]${NC} 已移除链接: $target"
 }
 
-deploy_tree_children() {
+# 递归地链接目录下的所有文件，而不直接软链接目录本身
+deploy_tree_recursive_files() {
     local source_dir="$1"
     local target_dir="$2"
 
     [ -d "$source_dir" ] || return 0
 
-    for item in "$source_dir"/*; do
-        [ -e "$item" ] || continue
-        link_item "$item" "$target_dir/$(basename "$item")"
+    # 查找所有的普通文件，并逐一创建其所在目录并建立文件级别的软链接
+    find "$source_dir" -type f | while read -r src_file; do
+        local rel_path="${src_file#$source_dir/}"
+        local dest_file="$target_dir/$rel_path"
+        
+        # link_item 内部自带了 mkdir -p "$(dirname "$dest_file")"
+        link_item "$src_file" "$dest_file"
     done
 }
 
-cleanup_tree_children() {
+# 对应的递归清理函数：仅移除脚本创建的软链接
+cleanup_tree_recursive_files() {
     local source_dir="$1"
     local target_dir="$2"
 
     [ -d "$source_dir" ] || return 0
 
-    for item in "$source_dir"/*; do
-        [ -e "$item" ] || continue
-        remove_link "$target_dir/$(basename "$item")"
+    find "$source_dir" -type f | while read -r src_file; do
+        local rel_path="${src_file#$source_dir/}"
+        local dest_file="$target_dir/$rel_path"
+        
+        remove_link "$dest_file"
     done
 }
 
-deploy_local_children() {
+# 部署 .local 目录下的文件
+deploy_local_files() {
     local local_root="$DOTFILES_ROOT/.local"
-    [ -d "$local_root" ] || return 0
-
-    for subdir in "$local_root"/*; do
-        [ -d "$subdir" ] || continue
-        deploy_tree_children "$subdir" "$HOME/.local/$(basename "$subdir")"
-    done
+    deploy_tree_recursive_files "$local_root" "$HOME/.local"
 }
 
-cleanup_local_children() {
+# 清理 .local 目录下的文件
+cleanup_local_files() {
     local local_root="$DOTFILES_ROOT/.local"
-    [ -d "$local_root" ] || return 0
-
-    for subdir in "$local_root"/*; do
-        [ -d "$subdir" ] || continue
-        cleanup_tree_children "$subdir" "$HOME/.local/$(basename "$subdir")"
-    done
+    cleanup_tree_recursive_files "$local_root" "$HOME/.local"
 }
 
+# 部署家目录下的直接点文件 (如 .bashrc)
 deploy_root_dotfiles() {
-    for file in "$DOTFILES_ROOT"/.*; do
-        [ -e "$file" ] || continue
-
+    find "$DOTFILES_ROOT" -maxdepth 1 -type f -name ".*" | while read -r file; do
         local base_name
         base_name=$(basename "$file")
         case "$base_name" in
-            .|..|.git|.gitignore|.config|.local)
-                continue
-                ;;
+            .gitignore) continue ;;
         esac
 
         link_item "$file" "$HOME/$base_name"
     done
 }
 
+# 清理家目录下的直接点文件
 cleanup_root_dotfiles() {
-    for file in "$DOTFILES_ROOT"/.*; do
-        [ -e "$file" ] || continue
-
+    find "$DOTFILES_ROOT" -maxdepth 1 -type f -name ".*" | while read -r file; do
         local base_name
         base_name=$(basename "$file")
         case "$base_name" in
-            .|..|.git|.gitignore|.config|.local)
-                continue
-                ;;
+            .gitignore) continue ;;
         esac
 
         remove_link "$HOME/$base_name"
@@ -201,8 +207,11 @@ if [ "$COMMAND" = "link" ]; then
         echo "开始增量部署 Dotfiles..."
     fi
 
-    deploy_tree_children "$DOTFILES_ROOT/.config" "$HOME/.config"
-    deploy_local_children
+    # 部署 ~/.config 下的子文件（而不是整个 .config 目录）
+    deploy_tree_recursive_files "$DOTFILES_ROOT/.config" "$HOME/.config"
+    # 部署 ~/.local 下的子文件
+    deploy_local_files
+    # 部署家目录根下的直接隐藏文件（如 .zshrc）
     deploy_root_dotfiles
 
     if [ "$DRY_RUN" -eq 0 ]; then
@@ -220,8 +229,11 @@ else
     echo "开始清理 Dotfiles 软链接..."
 fi
 
-cleanup_tree_children "$DOTFILES_ROOT/.config" "$HOME/.config"
-cleanup_local_children
+# 清理 ~/.config 及其下链接的子文件
+cleanup_tree_recursive_files "$DOTFILES_ROOT/.config" "$HOME/.config"
+# 清理 ~/.local 下的软链接子文件
+cleanup_local_files
+# 清理家目录根下的直接隐藏软链接文件
 cleanup_root_dotfiles
 
 if [ "$DRY_RUN" -eq 0 ]; then
