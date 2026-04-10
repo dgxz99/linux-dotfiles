@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+
+# ==============================================================================
+# 随机下载动漫壁纸并应用至 GNOME
+# ==============================================================================
+
+# ================= 默认配置 =================
+API_URL="https://t.alcy.cc/pc/"
+SAVE_DIR="$HOME/Pictures/Wallpapers/api-random-download"
+KEEP_COUNT=15
+UPSCALE_THRESHOLD=2200
+
+ENABLE_CLEANUP=true
+ENABLE_UPSCALE=true
+SILENT_MODE=false
+
+# ================= 环境校验 =================
+if [ "$XDG_CURRENT_DESKTOP" != "GNOME" ]; then
+    [ "$SILENT_MODE" = false ] && notify-send -u critical "Error" "This script requires GNOME desktop."
+    exit 1
+fi
+
+# ================= 参数解析 =================
+usage() {
+    echo "用法: $(basename $0) [-k] [-n] [-s] [-h]"
+    echo "  -k  (Keep)    保留模式：不清理旧壁纸"
+    echo "  -n  (No Up)   禁用超分"
+    echo "  -s  (Silent)  静默模式"
+    exit 0
+}
+
+while getopts "knsh" opt; do
+  case $opt in
+    k) ENABLE_CLEANUP=false ;;
+    n) ENABLE_UPSCALE=false ;;
+    s) SILENT_MODE=true ;;
+    *) usage ;;
+  esac
+done
+
+send_notify() {
+    if [ "$SILENT_MODE" = false ]; then
+        notify-send "$1" "$2" $3
+    fi
+}
+
+# ================= 主逻辑 =================
+mkdir -p "$SAVE_DIR"
+RAW_FILENAME="wall_$(date +%s).jpg"
+RAW_PATH="${SAVE_DIR}/${RAW_FILENAME}"
+
+# 1. 下载模块
+if [ "$SILENT_MODE" = false ]; then
+    (
+        sleep 8
+        while true; do
+            notify-send "Wallpaper" "Downloading is still in progress..." --expire-time=5000 --icon=drive-harddisk --replace-id=999
+            sleep 8
+        done
+    ) &
+    NOTIFY_PID=$!
+fi
+
+send_notify "Wallpaper" "Downloading from Alcy..." "--expire-time=5000"
+
+USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+curl -L -s -A "$USER_AGENT" --connect-timeout 10 -m 120 -o "$RAW_PATH" "$API_URL"
+DOWNLOAD_EXIT_CODE=$?
+
+[ -n "${NOTIFY_PID:-}" ] && kill "$NOTIFY_PID" 2>/dev/null && wait "$NOTIFY_PID" 2>/dev/null
+
+if [ $DOWNLOAD_EXIT_CODE -ne 0 ] || [ ! -f "$RAW_PATH" ]; then
+    send_notify "Wallpaper Error" "Download failed" "--urgency=critical"
+    exit 1
+fi
+
+# 2. 智能超分模块
+FINAL_PATH="$RAW_PATH"
+MSG_EXTRA=""
+
+if [ "$ENABLE_UPSCALE" = true ] && command -v identify &> /dev/null; then
+    IMG_WIDTH=$(identify -format "%w" "$RAW_PATH")
+    if [ "$IMG_WIDTH" -gt 0 ] && [ "$IMG_WIDTH" -lt "$UPSCALE_THRESHOLD" ] && command -v waifu2x-ncnn-vulkan &> /dev/null; then
+        send_notify "Wallpaper" "Upscaling image..." "--expire-time=2000"
+        UPSCALED_PATH="${RAW_PATH%.*}.png"
+        if waifu2x-ncnn-vulkan -i "$RAW_PATH" -o "$UPSCALED_PATH" -n 1 -s 2; then
+            FINAL_PATH="$UPSCALED_PATH"
+            MSG_EXTRA="(Upscaled 2x)"
+            rm -f "$RAW_PATH"
+        fi
+    fi
+fi
+
+# 3. 应用模块
+URI="file://$FINAL_PATH"
+gsettings set org.gnome.desktop.background picture-uri "$URI"
+gsettings set org.gnome.desktop.background picture-uri-dark "$URI"
+gsettings set org.gnome.desktop.background picture-options 'zoom'
+
+# 4. 清理旧壁纸
+(
+    if [ "$ENABLE_CLEANUP" = true ]; then
+        DELETE_START=$((KEEP_COUNT + 1))
+        # 使用更稳健的方式清理旧文件，避免文件名带空格等问题
+        cd "$SAVE_DIR" || exit
+        ls -t | tail -n +$DELETE_START | while read -r old_file; do
+            rm -f "$old_file"
+        done
+    fi
+) &
+
+send_notify "Wallpaper Updated" "Enjoy! $MSG_EXTRA"

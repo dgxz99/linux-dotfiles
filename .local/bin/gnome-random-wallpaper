@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+
+# ==============================================================================
+# 脚本名称: gnome-random-wallpaper.sh
+# 描述: 递归搜索本地目录并为 GNOME 桌面随机切换壁纸
+# ==============================================================================
+
+# 1. 环境校验：确保运行在 GNOME 桌面
+if [ "$XDG_CURRENT_DESKTOP" != "GNOME" ]; then
+    echo "错误: 仅支持 GNOME 桌面环境。" >&2
+    [ -x "$(command -v notify-send)" ] && notify-send -u critical "环境错误" "此脚本仅支持 GNOME 桌面"
+    exit 1
+fi
+
+# 2. 配置：壁纸根目录 (根据你的截图，建议放在 Pictures)
+WALLPAPER_DIR="$HOME/Pictures/Wallpapers"
+
+# 3. 检查目录是否存在
+if [ ! -d "$WALLPAPER_DIR" ]; then
+    mkdir -p "$WALLPAPER_DIR"
+    echo "提示: 壁纸目录不存在，已创建: $WALLPAPER_DIR"
+    exit 0
+fi
+
+# 4. 递归查找图片文件并随机选择一张 (处理空格/特殊字符文件名更加安全)
+# 使用 readarray 将 find 的结果存入数组，如果文件很多，比直接传递给 shuf 更安全，也可以直接用 shuf -e 配合 find -print0
+mapfile -d '' PICS < <(find "$WALLPAPER_DIR" -type f \( -iname "*.jpg" -o -iname "*.png" -o -iname "*.jpeg" -o -iname "*.webp" \) -print0)
+
+if [ ${#PICS[@]} -eq 0 ]; then
+    echo "未在 $WALLPAPER_DIR 中找到任何图片文件。"
+    [ -x "$(command -v notify-send)" ] && notify-send -u normal "壁纸切换" "未找到图片文件"
+    exit 1
+fi
+
+# 在数组中随机取一张
+PIC="${PICS[RANDOM % ${#PICS[@]}]}"
+
+# 5. 应用壁纸
+URI="file://$PIC"
+
+# 同时设置浅色和深色模式壁纸
+gsettings set org.gnome.desktop.background picture-uri "$URI"
+gsettings set org.gnome.desktop.background picture-uri-dark "$URI"
+
+# 确保缩放模式为填充 (Zoom)
+gsettings set org.gnome.desktop.background picture-options 'zoom'
+
+# 发送通知 (带图标预览)
+if [ -x "$(command -v notify-send)" ]; then
+    notify-send -t 2000 -i "$PIC" "壁纸已随机切换" "$(basename "$PIC")"
+fi

@@ -27,9 +27,14 @@ function y
     rm -f -- "$tmp"
 end
 
-# 随机动漫壁纸脚本
+# 随机动漫壁纸脚本 (API 下载)
+function graw
+    command ~/.local/bin/gnome-random-anime-wallpaper $argv
+end
+
+# 随机本地壁纸脚本
 function raw
-    command ~/.config/scripts/random-anime-wallpaper.sh $argv
+    command ~/.local/bin/gnome-random-wallpaper $argv
 end
 
 # sl 命令的彩色版本，使用 lolcat 增强输出效果
