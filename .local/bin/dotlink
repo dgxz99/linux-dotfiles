@@ -16,6 +16,21 @@ BACKUP_DIR="$HOME/.dotfiles.backup/$(date +%Y%m%d_%H%M%S)" # 本地备份目录
 
 COMMAND=""
 DRY_RUN=0
+RECURSIVE_DOT_DIRS=(.config .local .codex)
+ROOT_DOTFILES_EXCLUDES=(.gitignore)
+
+should_skip_root_dotfile() {
+    local base_name="$1"
+    local excluded_name
+
+    for excluded_name in "${ROOT_DOTFILES_EXCLUDES[@]}"; do
+        if [ "$base_name" = "$excluded_name" ]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
 
 show_usage() {
     echo -e "用法: ${BLUE}${SCRIPT_NAME}${NC} <link|unlink> [选项]"
@@ -162,16 +177,22 @@ cleanup_tree_recursive_files() {
     done
 }
 
-# 部署 .local 目录下的文件
-deploy_local_files() {
-    local local_root="$DOTFILES_ROOT/.local"
-    deploy_tree_recursive_files "$local_root" "$HOME/.local"
+# 递归部署仓库中的指定目录到家目录中的同名位置
+deploy_recursive_dotdirs() {
+    local dir_name
+
+    for dir_name in "${RECURSIVE_DOT_DIRS[@]}"; do
+        deploy_tree_recursive_files "$DOTFILES_ROOT/$dir_name" "$HOME/$dir_name"
+    done
 }
 
-# 清理 .local 目录下的文件
-cleanup_local_files() {
-    local local_root="$DOTFILES_ROOT/.local"
-    cleanup_tree_recursive_files "$local_root" "$HOME/.local"
+# 清理通过递归部署创建的目录级软链接
+cleanup_recursive_dotdirs() {
+    local dir_name
+
+    for dir_name in "${RECURSIVE_DOT_DIRS[@]}"; do
+        cleanup_tree_recursive_files "$DOTFILES_ROOT/$dir_name" "$HOME/$dir_name"
+    done
 }
 
 # 部署家目录下的直接点文件 (如 .bashrc)
@@ -179,9 +200,9 @@ deploy_root_dotfiles() {
     find "$DOTFILES_ROOT" -maxdepth 1 -type f -name ".*" | while read -r file; do
         local base_name
         base_name=$(basename "$file")
-        case "$base_name" in
-            .gitignore) continue ;;
-        esac
+        if should_skip_root_dotfile "$base_name"; then
+            continue
+        fi
 
         link_item "$file" "$HOME/$base_name"
     done
@@ -192,9 +213,9 @@ cleanup_root_dotfiles() {
     find "$DOTFILES_ROOT" -maxdepth 1 -type f -name ".*" | while read -r file; do
         local base_name
         base_name=$(basename "$file")
-        case "$base_name" in
-            .gitignore) continue ;;
-        esac
+        if should_skip_root_dotfile "$base_name"; then
+            continue
+        fi
 
         remove_link "$HOME/$base_name"
     done
@@ -207,10 +228,8 @@ if [ "$COMMAND" = "link" ]; then
         echo "开始增量部署 Dotfiles..."
     fi
 
-    # 部署 ~/.config 下的子文件（而不是整个 .config 目录）
-    deploy_tree_recursive_files "$DOTFILES_ROOT/.config" "$HOME/.config"
-    # 部署 ~/.local 下的子文件
-    deploy_local_files
+    # 递归部署目录下的子文件，而不是整个目录本身
+    deploy_recursive_dotdirs
     # 部署家目录根下的直接隐藏文件（如 .zshrc）
     deploy_root_dotfiles
 
@@ -229,10 +248,8 @@ else
     echo "开始清理 Dotfiles 软链接..."
 fi
 
-# 清理 ~/.config 及其下链接的子文件
-cleanup_tree_recursive_files "$DOTFILES_ROOT/.config" "$HOME/.config"
-# 清理 ~/.local 下的软链接子文件
-cleanup_local_files
+# 清理递归部署目录下的软链接子文件
+cleanup_recursive_dotdirs
 # 清理家目录根下的直接隐藏软链接文件
 cleanup_root_dotfiles
 
