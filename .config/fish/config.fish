@@ -41,3 +41,6 @@ end
 function sl
     command sl | lolcat
 end
+
+# 代理
+proxy-on
