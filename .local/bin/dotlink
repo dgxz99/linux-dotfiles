@@ -10,8 +10,17 @@ NC='\033[0m' # 重置颜色
 
 # 目录路径与状态变量
 SCRIPT_NAME="$(basename "$0")"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DOTFILES_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)" # 相对脚本所在路径解析出 dotfiles 的根目录
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+while [ -L "$SCRIPT_PATH" ]; do
+    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd -P)"
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    case "$SCRIPT_PATH" in
+        /*) ;;
+        *) SCRIPT_PATH="$SCRIPT_DIR/$SCRIPT_PATH" ;;
+    esac
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd -P)"
+DOTFILES_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)" # 相对脚本所在路径解析出 dotfiles 的根目录
 BACKUP_DIR="$HOME/.dotfiles.backup/$(date +%Y%m%d_%H%M%S)" # 本地备份目录
 
 COMMAND=""
@@ -30,6 +39,113 @@ should_skip_root_dotfile() {
     done
 
     return 1
+}
+
+is_path_in_dotfiles_root() {
+    local path="$1"
+
+    case "$path/" in
+        "$DOTFILES_ROOT"/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+backup_path_for() {
+    local dest="$1"
+    local rel_path
+
+    rel_path="${dest#$HOME/}"
+    if [ "$rel_path" = "$dest" ]; then
+        rel_path="${dest#/}"
+    fi
+
+    echo "$BACKUP_DIR/$rel_path"
+}
+
+backup_item() {
+    local dest="$1"
+    local backup_dest
+
+    backup_dest="$(backup_path_for "$dest")"
+    echo -e "  ${YELLOW}[备份]${NC} 发现既有配置，移动 $dest -> $backup_dest"
+    mkdir -p "$(dirname "$backup_dest")"
+    mv "$dest" "$backup_dest"
+}
+
+migrate_managed_dir_link() {
+    local link_path="$1"
+    local resolved_target
+    local tmp_dir
+
+    resolved_target="$(readlink -f "$link_path" 2>/dev/null || true)"
+    if [ -z "$resolved_target" ] || ! is_path_in_dotfiles_root "$resolved_target"; then
+        return
+    fi
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo -e "  ${YELLOW}[预览-迁移]${NC} 将旧目录链接改为真实目录: $link_path"
+        return
+    fi
+
+    # 旧版本可能把整个配置目录链接到仓库，这里先落地成真实目录再做文件级链接
+    tmp_dir="$(mktemp -d "$(dirname "$link_path")/.dotlink-migrate.XXXXXX")"
+    cp -a "$link_path"/. "$tmp_dir"/
+    rm "$link_path"
+    mv "$tmp_dir" "$link_path"
+    echo -e "  ${YELLOW}[迁移]${NC} 已将旧目录链接改为真实目录: $link_path"
+}
+
+prepare_parent_dir() {
+    local dest="$1"
+    local parent_dir
+    local rel_path
+    local current_dir="$HOME"
+    local old_ifs
+    local part
+    local -a path_parts
+
+    parent_dir="$(dirname "$dest")"
+    if [ "$parent_dir" = "$HOME" ]; then
+        return
+    fi
+
+    case "$parent_dir/" in
+        "$HOME"/*) ;;
+        *)
+            if [ "$DRY_RUN" -eq 1 ]; then
+                echo -e "  ${YELLOW}[预览-建目录]${NC} 将创建目录: $parent_dir"
+                return
+            fi
+            mkdir -p "$parent_dir"
+            return
+            ;;
+    esac
+
+    rel_path="${parent_dir#$HOME/}"
+    old_ifs="$IFS"
+    IFS='/'
+    read -r -a path_parts <<< "$rel_path"
+    IFS="$old_ifs"
+
+    for part in "${path_parts[@]}"; do
+        [ -n "$part" ] || continue
+        current_dir="$current_dir/$part"
+
+        if [ -L "$current_dir" ]; then
+            migrate_managed_dir_link "$current_dir"
+        fi
+
+        if [ ! -e "$current_dir" ]; then
+            if [ "$DRY_RUN" -eq 1 ]; then
+                echo -e "  ${YELLOW}[预览-建目录]${NC} 将创建目录: $current_dir"
+            else
+                mkdir -p "$current_dir"
+            fi
+        elif [ ! -d "$current_dir" ]; then
+            echo "无法创建目录，路径已被普通文件占用: $current_dir" >&2
+            exit 1
+        fi
+    done
 }
 
 show_usage() {
@@ -92,6 +208,9 @@ link_item() {
     local src="$1"
     local dest="$2"
 
+    # 确保目标文件的父目录存在，并迁移旧版本留下的目录级链接
+    prepare_parent_dir "$dest"
+
     # 如果软链接已存在且指向正确，则跳过
     if [ -L "$dest" ] && [ "$(readlink "$dest")" = "$src" ]; then
         echo -e "  ${CYAN}[跳过]${NC} $dest 已正确链接，无需重复操作"
@@ -101,7 +220,11 @@ link_item() {
     # 预览模式下的逻辑展示
     if [ "$DRY_RUN" -eq 1 ]; then
         if [ -e "$dest" ] && [ ! -L "$dest" ]; then
-            echo -e "  ${YELLOW}[预览-备份]${NC} 将备份真实的旧配置 $dest -> $BACKUP_DIR/"
+            if [ -f "$src" ] && [ -f "$dest" ] && cmp -s "$src" "$dest"; then
+                echo -e "  ${YELLOW}[预览-替换]${NC} $dest 内容已与仓库一致，将直接改为软链接"
+            else
+                echo -e "  ${YELLOW}[预览-备份]${NC} 将备份真实的旧配置 $dest -> $(backup_path_for "$dest")"
+            fi
         elif [ -L "$dest" ]; then
             echo -e "  ${YELLOW}[预览-替换]${NC} 将替换指向错误的软链接 $dest"
         fi
@@ -109,14 +232,14 @@ link_item() {
         return
     fi
 
-    # 确保目标文件的父目录存在
-    mkdir -p "$(dirname "$dest")"
-
     # 如果目标是真实文件/目录而非软链接，则将其移动到备份目录
     if [ -e "$dest" ] && [ ! -L "$dest" ]; then
-        echo -e "  ${YELLOW}[备份]${NC} 发现既有配置，移动 $dest -> $BACKUP_DIR/"
-        mkdir -p "$BACKUP_DIR"
-        mv "$dest" "$BACKUP_DIR/"
+        if [ -f "$src" ] && [ -f "$dest" ] && cmp -s "$src" "$dest"; then
+            echo -e "  ${YELLOW}[替换]${NC} $dest 内容已与仓库一致，直接改为软链接"
+            rm "$dest"
+        else
+            backup_item "$dest"
+        fi
     # 如果目标是软链接（哪怕是死链接或是错的链接），直接删除
     elif [ -L "$dest" ]; then
         rm "$dest"
