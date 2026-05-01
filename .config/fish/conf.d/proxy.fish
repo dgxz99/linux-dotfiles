@@ -13,9 +13,6 @@ function proxy-on
         set -l https_host (gsettings get org.gnome.system.proxy.https host | string trim --chars="'")
         set -l https_port (gsettings get org.gnome.system.proxy.https port)
 
-        set -l socks_host (gsettings get org.gnome.system.proxy.socks host | string trim --chars="'")
-        set -l socks_port (gsettings get org.gnome.system.proxy.socks port)
-
         set -l ignore_hosts (gsettings get org.gnome.system.proxy ignore-hosts)
 
         if test -n "$http_host"; and test "$http_port" != 0
@@ -29,11 +26,6 @@ function proxy-on
         else if set -q http_proxy
             set -gx https_proxy "$http_proxy"
             set -gx HTTPS_PROXY "$http_proxy"
-        end
-
-        if test -n "$socks_host"; and test "$socks_port" != 0
-            set -gx all_proxy "socks5://$socks_host:$socks_port"
-            set -gx ALL_PROXY "$all_proxy"
         end
 
         set -gx no_proxy (string replace -a "'" "" -- $ignore_hosts | string replace -a "[" "" | string replace -a "]" "" | string replace -a ", " ",")
